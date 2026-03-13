@@ -1,0 +1,66 @@
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import datetime
+
+class AuditCreate(BaseModel):
+    nom_entreprise: str
+    secteur: Optional[str] = None
+    type_site: Optional[str] = "industrie"
+    localisation: Optional[str] = None
+    surface_m2: Optional[float] = None
+    nb_employes: Optional[int] = None
+    fournisseur_energie: Optional[str] = None
+    facture_annuelle_fcfa: Optional[float] = None
+    consommation_annuelle_kwh: Optional[float] = None
+    type_energie: Optional[str] = None
+    auditeur: Optional[str] = None
+
+class AuditOut(AuditCreate):
+    id: int
+    statut: str
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
+class EquipementCreate(BaseModel):
+    audit_id: int
+    categorie: str
+    nom: str
+    quantite: int = 1
+    puissance_kw: float
+    rendement_pct: Optional[float] = None
+    heures_an: float
+    annee_installation: Optional[int] = None
+    etat_maintenance: Optional[str] = None
+
+class ConsommationCreate(BaseModel):
+    audit_id: int
+    annee: int
+    mois: int
+    electricite_kwh: float = 0
+    gaz_kwh: float = 0
+    fioul_kwh: float = 0
+    vapeur_kwh: float = 0
+    cout_fcfa: float = 0
+
+class APECreate(BaseModel):
+    audit_id: int
+    titre: str
+    description: str
+    categorie: str
+    economie_kwh_an: float
+    economie_fcfa_an: float
+    investissement_fcfa: float
+    roi_mois: float
+    reduction_co2_t_an: float
+    priorite: int = 1
+
+class APEOut(APECreate):
+    id: int
+    source_ia: str
+    class Config:
+        from_attributes = True
+
+class IAMessage(BaseModel):
+    message: str
+    audit_id: Optional[int] = None

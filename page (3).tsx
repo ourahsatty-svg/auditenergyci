@@ -1,0 +1,3 @@
+DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres
+ANTHROPIC_API_KEY=sk-ant-...
+SECRET_KEY=votre-secret-key-ici

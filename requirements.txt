@@ -1,0 +1,111 @@
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from app.database import get_db
+from app import models, schemas
+import anthropic
+import os
+import json
+
+router = APIRouter()
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+SYSTEM_PROMPT = """Tu es un expert en audit énergétique certifié, spécialisé dans les audits conformes 
+aux normes EN 16247 et ISO 50002, appliquées en Côte d'Ivoire selon le modèle DGE (Direction Générale 
+de l'Énergie). Tu aides les cabinets d'audit à analyser les données énergétiques de leurs clients 
+industriels et tertiaires en Côte d'Ivoire. Tu connais :
+- Les tarifs CIE (environ 75-90 FCFA/kWh selon tranche)
+- Le facteur d'émission réseau CI : 0,47 kgCO2/kWh
+- Les benchmarks énergétiques des industries ivoiriennes
+- Les meilleures APE (actions d'amélioration énergétique) adaptées au contexte local
+Réponds toujours en français. Sois précis, technique et concret."""
+
+@router.post("/chat")
+async def chat_ia(msg: schemas.IAMessage, db: Session = Depends(get_db)):
+    context = ""
+    if msg.audit_id:
+        audit = db.query(models.Audit).filter(models.Audit.id == msg.audit_id).first()
+        if audit:
+            consomm = db.query(models.ConsommationMensuelle).filter(
+                models.ConsommationMensuelle.audit_id == msg.audit_id
+            ).all()
+            total_kwh = sum(c.electricite_kwh for c in consomm)
+            context = f"""
+Contexte du site audité :
+- Entreprise : {audit.nom_entreprise}
+- Secteur : {audit.secteur}
+- Type : {audit.type_site}
+- Localisation : {audit.localisation}
+- Consommation annuelle : {total_kwh:,.0f} kWh
+- Facture annuelle : {audit.facture_annuelle_fcfa:,.0f} FCFA
+- Surface : {audit.surface_m2} m²
+"""
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1000,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": context + "\n" + msg.message if context else msg.message}]
+    )
+    return {"response": response.content[0].text}
+
+@router.post("/generer-apes/{audit_id}")
+async def generer_apes(audit_id: int, db: Session = Depends(get_db)):
+    audit = db.query(models.Audit).filter(models.Audit.id == audit_id).first()
+    if not audit:
+        return {"error": "Audit non trouvé"}
+
+    equipements = db.query(models.Equipement).filter(models.Equipement.audit_id == audit_id).all()
+    consomm = db.query(models.ConsommationMensuelle).filter(
+        models.ConsommationMensuelle.audit_id == audit_id
+    ).all()
+    total_kwh = sum(c.electricite_kwh for c in consomm)
+    total_fcfa = sum(c.cout_fcfa for c in consomm)
+
+    equip_list = "\n".join([
+        f"- {e.nom} : {e.puissance_kw}kW, {e.heures_an}h/an, rendement {e.rendement_pct}%"
+        for e in equipements
+    ])
+
+    prompt = f"""Analyse ces données d'audit énergétique et génère exactement 4 APE (Actions d'Amélioration 
+Énergétique) prioritaires au format JSON. 
+
+Site : {audit.nom_entreprise} ({audit.secteur}) — {audit.localisation}
+Consommation totale : {total_kwh:,.0f} kWh/an
+Coût total : {total_fcfa:,.0f} FCFA/an
+Équipements :
+{equip_list}
+
+Réponds UNIQUEMENT avec ce JSON (sans markdown) :
+{{
+  "apes": [
+    {{
+      "titre": "...",
+      "description": "...",
+      "categorie": "eclairage|force_motrice|cvc|chaudiere|autre",
+      "economie_kwh_an": 0,
+      "economie_fcfa_an": 0,
+      "investissement_fcfa": 0,
+      "roi_mois": 0,
+      "reduction_co2_t_an": 0,
+      "priorite": 1
+    }}
+  ]
+}}"""
+
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1500,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    try:
+        data = json.loads(response.content[0].text)
+        saved = []
+        for ape_data in data["apes"]:
+            db_ape = models.APE(audit_id=audit_id, **ape_data)
+            db.add(db_ape)
+            saved.append(ape_data)
+        db.commit()
+        return {"message": f"{len(saved)} APE générées", "apes": saved}
+    except Exception as e:
+        return {"error": str(e), "raw": response.content[0].text}

@@ -1,0 +1,31 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.routers import audits, equipements, consommations, ape, rapports, ia
+from app.database import engine, Base
+
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(
+    title="AuditEnergy CI — API DGE",
+    description="Plateforme d'audit énergétique conforme DGE Côte d'Ivoire",
+    version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(audits.router, prefix="/api/audits", tags=["Audits"])
+app.include_router(equipements.router, prefix="/api/equipements", tags=["Équipements"])
+app.include_router(consommations.router, prefix="/api/consommations", tags=["Consommations"])
+app.include_router(ape.router, prefix="/api/ape", tags=["APE"])
+app.include_router(rapports.router, prefix="/api/rapports", tags=["Rapports"])
+app.include_router(ia.router, prefix="/api/ia", tags=["Assistant IA"])
+
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "AuditEnergy CI API v1.0 — DGE Côte d'Ivoire"}
